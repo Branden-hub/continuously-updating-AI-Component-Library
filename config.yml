@@ -1,0 +1,39 @@
+scheduler:
+  max_concurrent: 4
+  backoff_base_seconds: 2
+  max_retries: 3
+  idle_sleep_seconds: 300      # if running continuous mode, sleep between runs
+
+sources:
+  github:
+    queries:
+      - "transformers language:model stars:>200"
+      - "embeddings vector-database stars:>200"
+      - "computer vision ai library stars:>200"
+      - "speech recognition OR tts OR asr stars:>200"
+      - "langchain tool OR agent toolkit stars:>100"
+    languages: ["Python","C++","Rust","JavaScript","TypeScript"]
+    per_query_limit: 50
+    activity_threshold_days: 365  # if last commit older than this -> inactive
+    license_whitelist: []         # [] = allow all; or add e.g. ["Apache-2.0"]
+
+  huggingface:
+    tasks: ["text-classification","text-generation","question-answering","image-classification","automatic-speech-recognition","embeddings","multimodal"]
+    per_task_limit: 50
+
+  langchain_hub:
+    categories: ["tools","retrievers","agents","prompts"]
+    per_category_limit: 50
+
+  haystack:
+    components: ["retriever","reader","ranker","generator","document-store"]
+    per_component_limit: 50
+
+  awesome_lists:
+    urls:
+      - "https://raw.githubusercontent.com/josephmisiti/awesome-machine-learning/master/README.md"
+      - "https://raw.githubusercontent.com/hwchase17/langchain/master/docs/docs/extras/awesome_langchain.md"
+
+output:
+  jsonl: export/components.jsonl
+  markdown: export/index.md
