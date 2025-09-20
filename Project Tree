@@ -1,0 +1,19 @@
+ai_component_aggregator/
+├─ .env.example
+├─ requirements.txt
+├─ config.yml
+├─ main.py
+├─ normalize.py
+├─ storage.py
+├─ utils.py
+├─ exporters/
+│  ├─ export_jsonl.py
+│  └─ export_markdown.py
+├─ fetchers/
+│  ├─ __init__.py
+│  ├─ github.py
+│  ├─ huggingface.py
+│  ├─ langchain_hub.py
+│  ├─ haystack.py
+│  └─ awesome_lists.py
+└─ README.md
