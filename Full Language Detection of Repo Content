@@ -1,0 +1,174 @@
+Install: pip install pygments langdetect
+
+Update fetchers/github.py → hydrate_repo():
+-------------------------------------------------------
+from langdetect import detect, DetectorFactory
+DetectorFactory.seed = 0  # reproducible detection
+
+def detect_languages_from_text(text):
+    langs = set()
+    try:
+        lang = detect(text)
+        langs.add(lang)
+    except:
+        pass
+    return list(langs)
+------------------------------------------------------------------------------
+Add inside hydrate_repo after readme:
+-----------------------------------------------
+if not languages and readme:
+    languages = detect_languages_from_text(readme)
+---------------------------------------------------------------------------
+Robust HEAD/Checker for All Asset Links in README
+
+Extract all http(s) links from README and check in parallel using concurrent.futures.ThreadPoolExecutor.
+
+Append broken URLs to broken_links.
+
+utils.py helper:
+----------------------------------------------------------------------------------------------------------------------------------------------------
+import re
+from concurrent.futures import ThreadPoolExecutor
+
+URL_RE = re.compile(r"https?://[^\s)]+", re.I)
+
+def extract_links(text):
+    return URL_RE.findall(text or "")
+
+def check_links(links, max_workers=8):
+    broken = []
+    def _check(url):
+        try:
+            r = head(url)
+            if getattr(r, "status_code", 0) >= 400:
+                broken.append(url)
+        except:
+            broken.append(url)
+    with ThreadPoolExecutor(max_workers=max_workers) as exe:
+        exe.map(_check, links)
+    return broken
+--------------------------------------------------------------------------------
+Update hydrate_repo:
+--------------------------------------------------------------------------------
+links = extract_links(readme)
+broken_links = check_links(links)
+---------------------------------------------------------------------------------
+Store in broken_links field.
+-------------------------------------------------------------------------------
+
+Web UI (FastAPI) for Browsing / Filtering / Searching
+
+Install: pip install fastapi uvicorn jinja2 sqlite-utils
+
+Add webui.py:
+
+----------------------------------------------------------------------------
+
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse
+from storage import db
+import sqlite3
+import jinja2
+
+app = FastAPI()
+template_loader = jinja2.FileSystemLoader(searchpath="./templates")
+template_env = jinja2.Environment(loader=template_loader)
+
+@app.get("/", response_class=HTMLResponse)
+def index(q: str = Query(None), domain: str = Query(None)):
+    with db() as con:
+        cur = con.cursor()
+        sql = "SELECT name, summary, domain, repo_url FROM components WHERE 1=1"
+        params = []
+        if q:
+            sql += " AND (name LIKE ? OR summary LIKE ?)"
+            params += [f"%{q}%"]*2
+        if domain:
+            sql += " AND domain LIKE ?"
+            params.append(f"%{domain}%")
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+    template = template_env.get_template("index.html")
+    return template.render(components=rows)
+---------------------------------------------------------------------------------------------------------------------------
+
+Simple templates/index.html:
+-----------------------------------------------------------------------
+<!DOCTYPE html>
+<html>
+<head><title>AI Component Explorer</title></head>
+<body>
+<h1>AI Components</h1>
+<form method="get">
+<input type="text" name="q" placeholder="search..." />
+<input type="text" name="domain" placeholder="domain..." />
+<input type="submit" value="Search"/>
+</form>
+<ul>
+{% for name, summary, domain, url in components %}
+<li><strong>{{name}}</strong> [{{domain}}] - {{summary}} - <a href="{{url}}">Link</a></li>
+{% endfor %}
+</ul>
+</body>
+</html>
+-------------------------------------------------------------------------------------------------------------------------------
+Run:
+--------------------
+uvicorn webui:app --reload
+-----------------------------------------------
+4️⃣ Rate-Limit Handling (Queue + Token Bucket)
+
+Already have retry/backoff in utils.py.
+
+For large-scale crawling, use simple token bucket:
+-------------------------------------------------------------------------------
+
+import time
+from threading import Lock
+
+class TokenBucket:
+    def __init__(self, rate, capacity):
+        self.capacity = capacity
+        self.tokens = capacity
+        self.rate = rate
+        self.lock = Lock()
+        self.last = time.time()
+    def consume(self, n=1):
+        with self.lock:
+            now = time.time()
+            self.tokens += (now - self.last) * self.rate
+            if self.tokens > self.capacity:
+                self.tokens = self.capacity
+            self.last = now
+            if self.tokens >= n:
+                self.tokens -= n
+                return True
+            return False
+    def wait_for_token(self):
+        while not self.consume():
+            time.sleep(0.1)
+-----------------------------------------------------------------------------------------------
+Wrap all HTTP requests like get() with bucket.wait_for_token() to throttle API calls.
+-------------------------------------------------------------------------
+
+5️⃣ Job Scheduler (Airflow / Cron / systemd)
+
+Simple cron example (run every day 2am):
+------------------------------------------------------------------
+0 2 * * * cd /path/to/aggregator && /usr/bin/python3 main.py --once
+------------------------------------------------------------------------------
+For Airflow, create DAG that calls main.py --once.
+--------------------------------------------------------------------
+Optional Search Engine / Indexing
+
+Use SQLite FTS for full-text search:
+--------------------------------------------------------------------
+with db() as con:
+    con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS components_fts USING fts5(name, summary, readme_excerpt, example_code, content='components', content_rowid='rowid')")
+    con.execute("INSERT INTO components_fts(rowid, name, summary, readme_excerpt, example_code) SELECT rowid, name, summary, readme_excerpt, example_code FROM components")
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Then search:
+-----------------------
+SELECT * FROM components JOIN components_fts ON components.rowid = components_fts.rowid WHERE components_fts MATCH 'transformer';
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+This makes FastAPI search very fast.
